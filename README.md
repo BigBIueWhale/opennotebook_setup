@@ -1,62 +1,70 @@
-# Open Notebook — Secure Localhost Deployment (SSH-tunnel only) + Highest-Quality Local Models
+# Open Notebook - Secure Localhost Deployment (SSH-tunnel only) + Highest-Quality Local Models
 
-This setup keeps **Open Notebook completely invisible** to the public internet and even your LAN by binding **all Open Notebook ports to `127.0.0.1`** on the server. You access it **only** through an SSH tunnel.
+This setup keeps Open Notebook completely invisible to the public internet and even your LAN by binding all Open Notebook ports to 127.0.0.1 on the server. You access it only through an SSH tunnel.
 
-It also forces Open Notebook to use:
-- **LLM:** `qwen3:32b-q4_K_M-opennotebook` (a custom Ollama model we create to bake in your exact “high quality” defaults + `/think`)
-- **Embeddings:** `bge-m3:567m-fp16`
-- **Audio:** disabled (no STT/TTS providers/models) to preserve VRAM and avoid surprise downloads/loads
+This setup is opinionated for:
+- Ubuntu 24.04 LTS
+- RTX 5090 (32 GB VRAM)
+- Ollama running on the host, Open Notebook running in Docker
+- Maximum correctness over speed
 
-> Why the custom LLM name?  
-> Open Notebook will call *whatever* model name you configure. So we make a dedicated Ollama model whose defaults match your quality-first parameters and whose system behavior starts in **thinking mode** via `/think`.
+Model policy (simple and strict):
+- Chat model: qwen3 (32K context) for day-to-day chat
+- All other LLM roles: nemotron-3-nano (220K context) so Open Notebook can stuff huge context without silently truncating
+- Embeddings: bge-m3 fp16
+- Audio: disabled (no STT/TTS) to avoid surprise downloads and VRAM pressure
+
+Why custom model names?
+Open Notebook will call whatever model name you configure. So we create dedicated Ollama models with the exact context limits (and behavior) baked in.
 
 ---
 
 ## 0) Preconditions (do these once)
 
-On the **server** (your RTX 5090 box):
+On the server (your RTX 5090 box):
 
 - Docker + Docker Compose installed
 - Ollama installed and running
+- Ollama reachable from containers via the Docker bridge IP (typically 172.17.0.1:11434)
+
+If you already set Ollama to bind on the docker0 bridge (common for Docker-only access), you are good.
 
 ---
 
 ## 1) Pull the exact Ollama models (be explicit)
 
-Run on the **server**:
+Run on the server:
 
 ```bash
 ollama pull qwen3:32b-q4_K_M
+ollama pull nemotron-3-nano:30b-a3b-q4_K_M
 ollama pull bge-m3:567m-fp16
 ````
 
 ---
 
-## 2) Create the dedicated “Open Notebook” Qwen3 model (bakes in `/think` + your parameters)
+## 2) Create the dedicated Open Notebook Qwen3 chat model (32K, quality defaults, starts in thinking mode)
 
-We create: **`qwen3:32b-q4_K_M-opennotebook`** (this is the model name you will select in the Open Notebook UI).
+We create: qwen3:32b-q4_K_M-opennotebook
+(This is the model name you will select in the Open Notebook UI for Chat.)
 
-On the **server**:
+On the server:
 
 ```bash
 mkdir -p ~/open-notebook/ollama_models
 cd ~/open-notebook/ollama_models
 ```
 
-Create `Modelfile.qwen3-32b-q4_K_M-opennotebook`:
+Create Modelfile.qwen3-32b-q4_K_M-opennotebook:
 
 ```bash
 cat > Modelfile.qwen3-32b-q4_K_M-opennotebook <<'EOF'
 FROM qwen3:32b-q4_K_M
 
-# ===== Your quality-first defaults =====
-# Highest context window setting supported by Qwen3-32B before quality loss
+# ===== Quality-first defaults =====
 PARAMETER num_ctx 32768
-
-# IMake sure the LLM can talk for as long as it sees fit
 PARAMETER num_predict -1
 
-# Sampling: conservative / high-quality bias (your stated preferences)
 PARAMETER temperature 0.6
 PARAMETER top_p 0.95
 PARAMETER top_k 20
@@ -69,12 +77,12 @@ SYSTEM """
 
 Rules:
 - Be precise and conservative. If you're not sure, say you're not sure.
-- Prefer grounded answers based on the user's notebook sources when they are available.
+- Prefer grounded answers based on the notebook sources when they are available.
 """
 EOF
 ```
 
-Now create the model:
+Create the model:
 
 ```bash
 ollama create qwen3:32b-q4_K_M-opennotebook -f Modelfile.qwen3-32b-q4_K_M-opennotebook
@@ -88,7 +96,60 @@ ollama run qwen3:32b-q4_K_M-opennotebook "Say 'ready' and nothing else."
 
 ---
 
-## 3) Create deployment directories
+## 3) Create the dedicated Open Notebook Nemotron long-context model (220K context)
+
+We create: nemotron-3-nano:30b-a3b-q4_K_M-opennotebook-220k
+(This is the model name you will select in the Open Notebook UI for: Tools, Transformations, Large Context.)
+
+On the server:
+
+```bash
+cd ~/open-notebook/ollama_models
+```
+
+Create Modelfile.nemotron-3-nano-30b-a3b-q4_K_M-opennotebook-220k:
+
+```bash
+cat > Modelfile.nemotron-3-nano-30b-a3b-q4_K_M-opennotebook-220k <<'EOF'
+FROM nemotron-3-nano:30b-a3b-q4_K_M
+
+# The only special requirement: exactly 220K context (fits 32 GB VRAM in this setup)
+PARAMETER num_ctx 220000
+
+# Let the model finish (avoid arbitrary cutoffs)
+PARAMETER num_predict -1
+
+SYSTEM """
+You are the assistant inside Open Notebook.
+
+Rules:
+- Be precise and conservative. If you're not sure, say you're not sure.
+- Prefer grounded answers based on the notebook sources when they are available.
+"""
+EOF
+```
+
+Create the model:
+
+```bash
+ollama create nemotron-3-nano:30b-a3b-q4_K_M-opennotebook-220k -f Modelfile.nemotron-3-nano-30b-a3b-q4_K_M-opennotebook-220k
+```
+
+Sanity check:
+
+```bash
+ollama run nemotron-3-nano:30b-a3b-q4_K_M-opennotebook-220k "Say 'ready' and nothing else."
+```
+
+Optional verification (confirm num_ctx):
+
+```bash
+ollama show nemotron-3-nano:30b-a3b-q4_K_M-opennotebook-220k | sed -n '1,120p'
+```
+
+---
+
+## 4) Create deployment directories
 
 ```bash
 mkdir -p ~/open-notebook/notebook_data
@@ -98,7 +159,7 @@ cd ~/open-notebook
 
 ---
 
-## 4) Create `docker-compose.yml` (localhost-only ports)
+## 5) Create docker-compose.yml (localhost-only ports)
 
 Create/edit:
 
@@ -129,7 +190,7 @@ services:
 
 ---
 
-## 5) Create `docker.env` (the important bits)
+## 6) Create docker.env (the important bits)
 
 Create/edit:
 
@@ -179,7 +240,7 @@ SURREAL_DATABASE=production
 
 ---
 
-## 6) Start Open Notebook
+## 7) Start Open Notebook
 
 ```bash
 docker compose up -d
@@ -193,9 +254,9 @@ docker compose ps
 
 ---
 
-## 7) Connect from your laptop/desktop via SSH tunnel (required)
+## 8) Connect from your laptop/desktop via SSH tunnel (required)
 
-Run this on your **client machine**:
+Run this on your client machine:
 
 ```bash
 ssh -N -L 8502:localhost:8502 -L 5055:localhost:5055 user@your-server-ip
@@ -211,93 +272,116 @@ http://localhost:8502
 
 ---
 
-## 8) Configure Open Notebook UI (this is the part that must be correct)
+## 9) Configure Open Notebook UI (this is the part that must be correct)
 
-Open Notebook's UI has a **Models** page in the sidebar. Do this there.
+Open Notebook has a Models page in the sidebar. Configure these model slots exactly.
 
-### 8.1 Add / select the Ollama LLM everywhere
+### 9.1 Chat model (Qwen3 32K)
 
-In **Models**:
+Models -> Chat model:
 
-* For **Chat model**:
-
-  * Provider: `Ollama`
-  * Model name: `qwen3:32b-q4_K_M-opennotebook`
-  * Save, then set as Default
-
-Repeat the same model for:
-
-* **Tools**
-* **Transformations**
-* **Large Context**
-
-Yes, all four should be the same model here. This avoids silent “fallback” behavior where one role ends up using a different model.
-
-### 8.2 Set the embedding model
-
-In **Models** → **Embeddings**:
-
-* Provider: `Ollama`
-* Model name: `bge-m3:567m-fp16`
+* Provider: Ollama
+* Model name: qwen3:32b-q4_K_M-opennotebook
 * Save, then set as Default
 
-### 8.3 Disable audio completely (VRAM + stability)
+This keeps normal chat fast and high quality, but it is still 32K context.
 
-In **Models**:
+### 9.2 Everything else (Nemotron 220K)
 
-* **Speech-to-Text**: do not configure a provider/model
-* **Text-to-Speech**: do not configure a provider/model
+Models -> Tools:
 
-This prevents Open Notebook from ever trying to download or load audio models.
+* Provider: Ollama
+* Model name: nemotron-3-nano:30b-a3b-q4_K_M-opennotebook-220k
+* Save, then set as Default
+
+Models -> Transformations:
+
+* Provider: Ollama
+* Model name: nemotron-3-nano:30b-a3b-q4_K_M-opennotebook-220k
+* Save, then set as Default
+
+Models -> Large Context:
+
+* Provider: Ollama
+* Model name: nemotron-3-nano:30b-a3b-q4_K_M-opennotebook-220k
+* Save, then set as Default
+
+This is the core fix for the "Open Notebook exceeded my model context and chopped the beginning" problem:
+
+* Any role that tends to ingest lots of text uses the 220K model.
+
+### 9.3 Embeddings (bge-m3 fp16)
+
+Models -> Embeddings:
+
+* Provider: Ollama
+* Model name: bge-m3:567m-fp16
+* Save, then set as Default
+
+### 9.4 Disable audio completely (VRAM + stability)
+
+Models:
+
+* Speech-to-Text: do not configure a provider/model
+* Text-to-Speech: do not configure a provider/model
+
+This prevents Open Notebook from trying to download or load audio models.
 
 ---
 
-## 9) Make embedding behavior deterministic (important for search quality)
+## 10) Embeddings: chunk size and what to do for bge-m3
 
-When you add sources to a notebook, Open Notebook can embed immediately or skip embeddings.
+Open Notebook embeddings work like this:
 
-For **search quality**, do this:
+* When you enable embeddings for a source, Open Notebook chunks the extracted text into chunks of about 1000 words and embeds each chunk.
+* Those embeddings power semantic search and retrieval for the Ask/research flows.
 
-* Set your ingestion behavior to **always embed** (so every source becomes searchable semantically).
-* If you previously embedded with a different embedding model: you *must* re-embed, otherwise your vector index is a mix of incompatible vector spaces.
+For bge-m3 (which supports long inputs), the default 1000-word chunks are already "large" compared to typical RAG chunking. Do not try to make chunks smaller unless you have a specific reason (smaller chunks usually increase recall but often hurt precision and create noisy retrieval).
 
-### Re-embed after switching embedding models
+Practical guidance for best results with the fixed chunking:
 
-Open the notebook and use its **Advanced** actions to trigger **Re-embed content** (Open Notebook added a dedicated re-embedding action specifically for this scenario).
+* Always embed (so every source becomes searchable).
+* Keep source text clean (headings and paragraph breaks matter). If a PDF extracts with garbage line breaks, fix extraction (or re-upload a cleaner version) before embedding.
+* After switching embedding models, re-embed everything so the vector index is not a mix of incompatible embedding spaces.
 
-If you can't find it quickly: the practical fallback is to remove and re-add sources (but the goal is to use the built-in re-embed action).
+Re-embed after switching embedding models:
+
+* Open the notebook and use its Advanced actions to trigger Re-embed content.
+* Fallback: remove and re-add sources (slower, but works).
 
 ---
 
-## 10) Verification checklist (do not skip)
+## 11) Verification checklist (do not skip)
 
-### 10.1 Confirm Open Notebook is truly localhost-only on the server
+### 11.1 Confirm Open Notebook is truly localhost-only on the server
 
-On the **server**:
+On the server:
 
 ```bash
 ss -ltnp | egrep '(:8502|:5055)'
 ```
 
-You should see `127.0.0.1:8502` and `127.0.0.1:5055` (not `0.0.0.0`).
+You should see 127.0.0.1:8502 and 127.0.0.1:5055 (not 0.0.0.0).
 
-### 10.2 Confirm Open Notebook can reach Ollama
+### 11.2 Confirm Open Notebook API is up
 
-On the **server**:
+On the server:
 
 ```bash
 curl -s http://127.0.0.1:5055/docs >/dev/null && echo "API docs reachable"
 ```
 
-(And check Ollama is up from host perspective:)
+### 11.3 Confirm Ollama is up from host perspective
+
+On the server:
 
 ```bash
 curl -s http://127.0.0.1:11434/api/tags | head
 ```
 
-### 10.3 Confirm the right models are actually used
+### 11.4 Confirm the right models are actually used
 
-On the **server**, watch what's loaded:
+On the server, watch what is loaded:
 
 ```bash
 ollama ps
@@ -305,30 +389,22 @@ ollama ps
 
 Then in the UI:
 
-1. Add a Source → it should load/use `bge-m3:567m-fp16`
-2. Chat → it should load/use `qwen3:32b-q4_K_M-opennotebook`
+1. Add a Source with embeddings enabled -> should load/use `bge-m3:567m-fp16`
+2. Normal chat -> should load/use `qwen3:32b-q4_K_M-opennotebook`
+3. Run a Transformation or anything tool-heavy / long-context -> should load/use `nemotron-3-nano:30b-a3b-q4_K_M-opennotebook-220k`
 
 ---
 
-## What you *do not* need to change when switching to `bge-m3:567m-fp16`
+## 12) Security status (what this deployment guarantees)
 
-If you are already using Ollama successfully:
-
-* You do **not** need to change Open Notebook “context” settings just because you changed the embedding model.
-* You **do** need to:
-
-  1. Set the embedding model to `bge-m3:567m-fp16`
-  2. Re-embed existing content so your index is consistent
-
-That's it.
-
----
-
-## Security status (what this deployment guarantees)
-
-* Web UI/API: **only reachable via SSH tunnel**
+* Web UI/API: only reachable via SSH tunnel
 * Data: stored on the server under `~/open-notebook/`
-* LLM + embeddings: **100% local** via Ollama
+* LLM + embeddings: 100% local via Ollama
 * Audio: disabled (no surprise VRAM pressure)
 
-If your goal is “maximum correctness over speed”, this is the cleanest way to make Open Notebook behave deterministically: one LLM everywhere, one embedding model everywhere, and a forced `/think` default baked into the LLM.
+This setup is intentionally simple:
+
+* One small-ish chat model (32K) for normal use
+* One massive-context model (220K) for everything that can blow up context
+* One embedding model everywhere
+* No audio stack
