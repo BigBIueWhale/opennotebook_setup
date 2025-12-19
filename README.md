@@ -3,7 +3,7 @@
 This setup keeps **Open Notebook completely invisible** to the public internet and even your LAN by binding **all Open Notebook ports to `127.0.0.1`** on the server. You access it **only** through an SSH tunnel.
 
 It also forces Open Notebook to use:
-- **LLM:** `opennotebook-qwen3:32b-q4_K_M` (a custom Ollama model we create to bake in your exact “high quality” defaults + `/think`)
+- **LLM:** `qwen3:32b-q4_K_M-opennotebook` (a custom Ollama model we create to bake in your exact “high quality” defaults + `/think`)
 - **Embeddings:** `bge-m3:567m-fp16`
 - **Audio:** disabled (no STT/TTS providers/models) to preserve VRAM and avoid surprise downloads/loads
 
@@ -34,7 +34,7 @@ ollama pull bge-m3:567m-fp16
 
 ## 2) Create the dedicated “Open Notebook” Qwen3 model (bakes in `/think` + your parameters)
 
-We create: **`opennotebook-qwen3:32b-q4_K_M`** (this is the model name you will select in the Open Notebook UI).
+We create: **`qwen3:32b-q4_K_M-opennotebook`** (this is the model name you will select in the Open Notebook UI).
 
 On the **server**:
 
@@ -43,10 +43,10 @@ mkdir -p ~/open-notebook/ollama_models
 cd ~/open-notebook/ollama_models
 ```
 
-Create `Modelfile.opennotebook-qwen3-32b-q4_K_M`:
+Create `Modelfile.qwen3-32b-q4_K_M-opennotebook`:
 
 ```bash
-cat > Modelfile.opennotebook-qwen3-32b-q4_K_M <<'EOF'
+cat > Modelfile.qwen3-32b-q4_K_M-opennotebook <<'EOF'
 FROM qwen3:32b-q4_K_M
 
 # ===== Your quality-first defaults =====
@@ -77,13 +77,13 @@ EOF
 Now create the model:
 
 ```bash
-ollama create opennotebook-qwen3:32b-q4_K_M -f Modelfile.opennotebook-qwen3-32b-q4_K_M
+ollama create qwen3:32b-q4_K_M-opennotebook -f Modelfile.qwen3-32b-q4_K_M-opennotebook
 ```
 
 Sanity check:
 
 ```bash
-ollama run opennotebook-qwen3:32b-q4_K_M "Say 'ready' and nothing else."
+ollama run qwen3:32b-q4_K_M-opennotebook "Say 'ready' and nothing else."
 ```
 
 ---
@@ -222,7 +222,7 @@ In **Models**:
 * For **Chat model**:
 
   * Provider: `Ollama`
-  * Model name: `opennotebook-qwen3:32b-q4_K_M`
+  * Model name: `qwen3:32b-q4_K_M-opennotebook`
   * Save, then set as Default
 
 Repeat the same model for:
@@ -306,7 +306,7 @@ ollama ps
 Then in the UI:
 
 1. Add a Source → it should load/use `bge-m3:567m-fp16`
-2. Chat → it should load/use `opennotebook-qwen3:32b-q4_K_M`
+2. Chat → it should load/use `qwen3:32b-q4_K_M-opennotebook`
 
 ---
 
