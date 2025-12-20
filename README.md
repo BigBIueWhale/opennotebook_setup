@@ -8,6 +8,11 @@ This setup is opinionated for:
 - Ollama running on the host, Open Notebook running in Docker
 - Maximum correctness over speed
 
+**Version policy (no “latest”, no drift):**
+- Open Notebook Docker image: **lfnovo/open_notebook:1.2.4-single**
+  - This is the exact version this README is written for.
+  - To upgrade in the future, you intentionally change this tag everywhere it appears.
+
 Model policy (simple and strict):
 - Chat model: qwen3 (32K context) for day-to-day chat
 - All other LLM roles: nemotron-3-nano (220K context) so Open Notebook can stuff huge context without silently truncating
@@ -25,9 +30,7 @@ On the server (your RTX 5090 box):
 
 - Docker + Docker Compose installed
 - Ollama installed and running
-- Ollama reachable from containers via the Docker bridge IP (typically 172.17.0.1:11434)
-
-If you already set Ollama to bind on the docker0 bridge (common for Docker-only access), you are good.
+- Ollama reachable from containers (host must be reachable from the Docker bridge; commonly `172.17.0.1:11434` on Linux)
 
 ---
 
@@ -159,7 +162,17 @@ cd ~/open-notebook
 
 ---
 
-## 5) Create docker-compose.yml (localhost-only ports)
+## 5) Pull the exact Open Notebook Docker image (pinned)
+
+Run on the server:
+
+```bash
+docker pull lfnovo/open_notebook:1.2.4-single
+```
+
+---
+
+## 6) Create docker-compose.yml (localhost-only ports, pinned image)
 
 Create/edit:
 
@@ -172,7 +185,7 @@ Paste:
 ```yaml
 services:
   open_notebook:
-    image: lfnovo/open_notebook:v1-latest-single
+    image: lfnovo/open_notebook:1.2.4-single
     restart: always
 
     # Strict localhost binding: not reachable from LAN / public internet
@@ -190,7 +203,7 @@ services:
 
 ---
 
-## 6) Create docker.env (the important bits)
+## 7) Create docker.env (the important bits)
 
 Create/edit:
 
@@ -240,7 +253,7 @@ SURREAL_DATABASE=production
 
 ---
 
-## 7) Start Open Notebook
+## 8) Start Open Notebook
 
 ```bash
 docker compose up -d
@@ -254,7 +267,7 @@ docker compose ps
 
 ---
 
-## 8) Connect from your laptop/desktop via SSH tunnel (required)
+## 9) Connect from your laptop/desktop via SSH tunnel (required)
 
 Run this on your client machine:
 
@@ -272,11 +285,11 @@ http://localhost:8502
 
 ---
 
-## 9) Configure Open Notebook UI (this is the part that must be correct)
+## 10) Configure Open Notebook UI (this is the part that must be correct)
 
 Open Notebook has a Models page in the sidebar. Configure these model slots exactly.
 
-### 9.1 Chat model (Qwen3 32K)
+### 10.1 Chat model (Qwen3 32K)
 
 Models -> Chat model:
 
@@ -286,7 +299,7 @@ Models -> Chat model:
 
 This keeps normal chat fast and high quality, but it is still 32K context.
 
-### 9.2 Everything else (Nemotron 220K)
+### 10.2 Everything else (Nemotron 220K)
 
 Models -> Tools:
 
@@ -310,7 +323,7 @@ This is the core fix for the "Open Notebook exceeded my model context and choppe
 
 * Any role that tends to ingest lots of text uses the 220K model.
 
-### 9.3 Embeddings (bge-m3 fp16)
+### 10.3 Embeddings (bge-m3 fp16)
 
 Models -> Embeddings:
 
@@ -318,7 +331,7 @@ Models -> Embeddings:
 * Model name: bge-m3:567m-fp16
 * Save, then set as Default
 
-### 9.4 Disable audio completely (VRAM + stability)
+### 10.4 Disable audio completely (VRAM + stability)
 
 Models:
 
@@ -329,7 +342,7 @@ This prevents Open Notebook from trying to download or load audio models.
 
 ---
 
-## 10) Embeddings: chunk size and what to do for bge-m3
+## 11) Embeddings: chunk size and what to do for bge-m3
 
 Open Notebook embeddings work like this:
 
@@ -351,9 +364,9 @@ Re-embed after switching embedding models:
 
 ---
 
-## 11) Verification checklist (do not skip)
+## 12) Verification checklist (do not skip)
 
-### 11.1 Confirm Open Notebook is truly localhost-only on the server
+### 12.1 Confirm Open Notebook is truly localhost-only on the server
 
 On the server:
 
@@ -363,7 +376,7 @@ ss -ltnp | egrep '(:8502|:5055)'
 
 You should see 127.0.0.1:8502 and 127.0.0.1:5055 (not 0.0.0.0).
 
-### 11.2 Confirm Open Notebook API is up
+### 12.2 Confirm Open Notebook API is up
 
 On the server:
 
@@ -371,7 +384,7 @@ On the server:
 curl -s http://127.0.0.1:5055/docs >/dev/null && echo "API docs reachable"
 ```
 
-### 11.3 Confirm Ollama is up from host perspective
+### 12.3 Confirm Ollama is up from host perspective
 
 On the server:
 
@@ -379,7 +392,7 @@ On the server:
 curl -s http://127.0.0.1:11434/api/tags | head
 ```
 
-### 11.4 Confirm the right models are actually used
+### 12.4 Confirm the right models are actually used
 
 On the server, watch what is loaded:
 
@@ -395,7 +408,7 @@ Then in the UI:
 
 ---
 
-## 12) Security status (what this deployment guarantees)
+## 13) Security status (what this deployment guarantees)
 
 * Web UI/API: only reachable via SSH tunnel
 * Data: stored on the server under `~/open-notebook/`
