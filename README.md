@@ -342,25 +342,56 @@ This prevents Open Notebook from trying to download or load audio models.
 
 ---
 
-## 11) Embeddings: chunk size and what to do for bge-m3
+## 11) Embeddings: chunking + retrieval reality in Open Notebook (with **bge-m3:567m-fp16**)
 
-Open Notebook embeddings work like this:
+Open Notebook’s embeddings system is *useful*, but it is also one of the most “black box / least tunable” parts of the product. You do not get a modern, configurable RAG pipeline here—you get a fixed preprocessing rule and a basic vector-search interface.
 
-* When you enable embeddings for a source, Open Notebook chunks the extracted text into chunks of about 1000 words and embeds each chunk.
-* Those embeddings power semantic search and retrieval for the Ask/research flows.
+### 11.1 What Open Notebook actually does by default
 
-For bge-m3 (which supports long inputs), the default 1000-word chunks are already "large" compared to typical RAG chunking. Do not try to make chunks smaller unless you have a specific reason (smaller chunks usually increase recall but often hurt precision and create noisy retrieval).
+When you enable embeddings for a source, Open Notebook:
+- extracts text from the source (PDF/DOC/PPT/ePub extraction is done with **Docling** by default),
+- **splits the extracted text into chunks of 1000 words**,
+- embeds each chunk using your configured embedding model (here: `bge-m3:567m-fp16`),
+- uses those chunk embeddings to make the source discoverable for semantic retrieval (including Ask).
 
-Practical guidance for best results with the fixed chunking:
+There is no documented UI-level control for chunk length, overlap, or chunking strategy beyond this “1000 words” rule.
 
-* Always embed (so every source becomes searchable).
-* Keep source text clean (headings and paragraph breaks matter). If a PDF extracts with garbage line breaks, fix extraction (or re-upload a cleaner version) before embedding.
-* After switching embedding models, re-embed everything so the vector index is not a mix of incompatible embedding spaces.
+### 11.2 The part that’s genuinely good in our setup: 1000-word chunks pair well with bge-m3
 
-Re-embed after switching embedding models:
+Open Notebook’s default **1000-word** chunk size is unusually large compared to many RAG defaults—and that’s not automatically a bad thing.
 
-* Open the notebook and use its Advanced actions to trigger Re-embed content.
-* Fallback: remove and re-add sources (slower, but works).
+For **bge-m3**, it’s especially defensible because bge-m3 is explicitly designed to handle long inputs (up to ~8192 tokens). So, from a “will the embedder choke?” standpoint, 1000-word chunks are generally within what bge-m3 is built for.
+
+In plain terms: Open Notebook’s default chunk size is coarse, but it is *not* obviously mismatched to bge-m3.
+
+### 11.3 Where Open Notebook falls short (facts first, then “what an ideal system would do”)
+
+**(1) Chunking is word-based, not token-based (and fixed)**
+- Open Notebook chunks by **words** (1000 words), but embedding models operate on **tokens**.
+- That mismatch means chunk “size” is inconsistent across writing styles, languages, and messy PDF extractions.
+- You can’t tune this in-app (no documented per-source chunk size, no overlap slider, no semantic/sentence boundary chunking).
+
+**Ideal:** token-based chunking, semantic boundaries, configurable overlap, per-source policies.
+
+**(2) No documented overlap**
+Open Notebook’s documentation describes chunking into 1000-word chunks, but does not describe overlap. If overlap is absent (or minimal), boundary facts are fragile: a definition can land at the end of one chunk while the key usage lands in the next.
+
+**Ideal:** small, configurable overlap (or sentence-aware splitting) to protect boundary context.
+
+**(3) bge-m3’s strongest retrieval features are likely left on the table**
+bge-m3 is a *multi-function* embedding model (dense + sparse/lexical + multi-vector interaction). Open Notebook’s documented vector search is cosine similarity over embeddings, with a minimum similarity threshold—i.e., straightforward dense-vector retrieval.
+
+That means even though we chose a very capable embedder, Open Notebook (as documented) is not clearly exploiting:
+- sparse/lexical signals produced by bge-m3,
+- multi-vector/late-interaction scoring,
+- hybrid scoring pipelines that combine lexical + dense in one ranker.
+
+**Ideal:** hybrid retrieval and/or multi-vector reranking that actually uses bge-m3’s multi-function outputs.
+
+**(4) Extraction quality is a first-order limitation**
+Open Notebook’s pipeline depends on text extraction before chunking. Docling is the default extractor, and Open Notebook itself acknowledges PDF table handling and vision-based extraction as “roadmap” items. So if extraction loses structure (tables, figures, layout), embeddings faithfully encode the *wrong* text.
+
+**Ideal:** robust structure-preserving extraction, better table recovery, and optional vision-based parsing for PDFs with real layout.
 
 ---
 
