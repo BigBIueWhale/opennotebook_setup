@@ -42,7 +42,7 @@ Run on the server:
 ollama pull qwen3:32b-q4_K_M
 ollama pull nemotron-3-nano:30b-a3b-q4_K_M
 ollama pull bge-m3:567m-fp16
-````
+```
 
 ---
 
